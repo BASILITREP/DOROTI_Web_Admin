@@ -1,6 +1,5 @@
-import type { Branch, FieldEngineer, ServiceRequest, ActivityHistory } from '../types';
+import type { FieldEngineer,  ActivityHistory } from '../types';
 import image from '../assets/windowsyarn.jpg';
-import { isConnected } from './socketService';
 
 // Use environment variable for API URL with fallback
 const API_URL = import.meta.env.VITE_DB_URL || 'http://localhost:5242/api';
@@ -22,21 +21,7 @@ const handleResponse = async (response: Response) => {
   return null;
 };
 
-// API Functions
-export const fetchBranches = async (): Promise<Branch[]> => {
-  const response = await fetch(`${API_URL}/Branches`);
-  const data = await handleResponse(response);
-  
-  // Transform the data to match the frontend expected structure
-  return data.map((branch: any) => ({
-    _id: branch.id.toString(),
-    name: branch.name,
-    location: branch.address,
-    image: branch.image || 'https://images.unsplash.com/photo-1554469384-e58fac937bb4?q=80&w=1000&auto=format&fit=crop',
-    lat: branch.latitude,
-    lng: branch.longitude,
-  }));
-};
+
 
 export const fetchFieldEngineers = async (): Promise<FieldEngineer[]> => {
   // Fixed URL to match controller name
@@ -51,92 +36,28 @@ export const fetchFieldEngineers = async (): Promise<FieldEngineer[]> => {
     lat: fe.currentLatitude || 0,
     status: fe.status || 'Active',
     lastUpdated: fe.updatedAt || new Date().toISOString(),
+    currentAddress: fe.currentAddress || 'Unknown',
+    timeIn: fe.timeIn || null,
   }));
 };
 
-export const fetchServiceRequests = async (): Promise<ServiceRequest[]> => {
-  const response = await fetch(`${API_URL}/ServiceRequests`);
-  const data = await handleResponse(response);
-  
-  // Transform the data to match the frontend expected structure
-  return data.map((sr: any) => ({
-    id: String(sr.id ?? sr.Id),
-    branchId: String(sr.branchId ?? sr.BranchId),
-    branchName: sr.branchName ?? sr.BranchName ?? (sr.branch?.name ?? 'Unknown Branch'),
-    lat: sr.lat ?? sr.Lat ?? (sr.branch?.latitude ?? 0),
-    lng: sr.lng ?? sr.Lng ?? (sr.branch?.longitude ?? 0),
-    status: (sr.status ?? '').toLowerCase(),
-    createdAt: sr.createdAt ?? sr.CreatedAt,
-    acceptedAt: sr.acceptedAt ?? sr.AcceptedAt,
-    acceptedByFeId: sr.fieldEngineerId ?? sr.FieldEngineerId,
-    acceptedByFeName: sr.fieldEngineerName ?? sr.FieldEngineerName ?? sr.fieldEngineer?.name,
-    currentRadiusKm: sr.currentRadiusKm ?? sr.CurrentRadiusKm ?? 5,
-  }));
-};
 
-export const createServiceRequest = async (data: { branchId: string, branch: Branch }) => {
-  try {
-    const branchId = parseInt(data.branchId);
-    
-    // We need to map our frontend Branch model to match the backend's expected structure
-    const response = await fetch(`${API_URL}/ServiceRequests`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        branchId: branchId,
-        status: "pending",
-        createdAt: new Date().toISOString(),
-        lat: data.branch.lat,
-        lng: data.branch.lng,
-        branchName: data.branch.name,
-        title: `Service Request for ${data.branch.name}`,
-        description: `Service required at ${data.branch.location}`,
-        priority: "Medium",
-        branch: {
-          id: branchId,
-          name: data.branch.name,
-          address: data.branch.location,
-          latitude: data.branch.lat,
-          longitude: data.branch.lng
-        }
-      }),
-    });
-    
-    return await handleResponse(response);
-  } catch (error) {
-    console.error('Error creating service request:', error);
-    throw error;
-  }
-}
-export const acceptServiceRequest = async (
-  serviceRequestId: string, 
-  fieldEngineerId: number
-): Promise<void> => {
-  const response = await fetch(`${API_URL}/ServiceRequests/${serviceRequestId}/accept`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fieldEngineerId })
-  });
-  
-  await handleResponse(response);
 
-  // With sockets, we don't need to manually refresh data after operations
-  // The server will broadcast the changes and our socket subscriptions will update the UI
-};
 
-export const loginUser = async (username: string, password: string) => {
-  const response = await fetch(`${API_URL}/api/auth/login`, {
+
+
+export const loginUser = async (email: string, password: string) => {
+  const response = await fetch(`${API_URL}/FieldEngineer/webadmin/login`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ email, password }),
   });
 
   if (!response.ok) {
-    throw new Error("Login failed");
+    const error = await response.json();
+    throw new Error(error.message || "Login failed");
   }
 
   return response.json();
@@ -184,49 +105,138 @@ export const stopFieldEngineerNavigation = async (fieldEngineerId: number) => {
   return await handleResponse(response);
 };
 
-export const fetchActivityHistory = async (fieldEngineerId: number): Promise<ActivityHistory[]> => {
-
-  const response = await fetch(`${API_URL}/FieldEngineer/${fieldEngineerId}/activity`);
- 
-  const data = await handleResponse(response);
- 
-  
-  // Transform the backend data to match the frontend component's expected structure
-  return data.map((event: any) => {
-    const startTime = new Date(event.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const endTime = new Date(event.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    if (event.type === 1) { // 1 corresponds to the 'Drive' enum in C#
-      return {
-        id: event.id,
-        feId: event.fieldEngineerId,
-        type: 'drive',
-        distance: `${event.distanceKm.toFixed(1)} km`,
-        timeRange: `${startTime} - ${endTime}`,
-        duration: `${event.durationMinutes} min`,
-        topSpeed: `${event.topSpeedKmh.toFixed(0)} km/h`,
-        riskyEvents: 0, // Placeholder
-        mapImage: image, // This will be replaced by the map component
-        startLat: event.startLatitude,
-        startLng: event.startLongitude,
-        startAddress: event.startAddress,
-        endLat: event.endLatitude,
-        endLng: event.endLongitude,
-        endAddress: event.endAddress,
-      };
-    } else { // 0 corresponds to the 'Stop' enum
-      return {
-        id: event.id,
-        feId: event.fieldEngineerId,
-        type: 'stop',
-        locationName: event.locationName,
-        address: event.address,
-        timeRange: `${startTime} - ${endTime}`,
-        duration: `${event.durationMinutes} min`,
-        mapImage: image,
-        lat: event.latitude,
-        lng: event.longitude,
-      };
+export const fetchActivityHistory = async (
+  fieldEngineerId: number,
+  minStayMinutes?: number,
+  startDate?: string,
+  endDate?: string
+): Promise<ActivityHistory[]> => {
+  try {
+    const params = new URLSearchParams();
+    
+    if (minStayMinutes && minStayMinutes > 0) {
+      params.append('minStayMinutes', minStayMinutes.toString());
     }
-  });
+    
+    if (startDate) {
+      params.append('startDate', startDate);
+    }
+    if (endDate) {
+      params.append('endDate', endDate);
+    }
+    
+    const url = `${API_URL}/FieldEngineer/${fieldEngineerId}/history${
+      params.toString() ? '?' + params.toString() : ''
+    }`;
+    
+    console.log('📅 Fetching activity history with params:', {
+      fieldEngineerId,
+      minStayMinutes,
+      startDate,
+      endDate,
+      url
+    });
+    
+    const response = await fetch(url);
+    const data = await handleResponse(response);
+   
+    console.log(`✅ Received ${data.length} events from backend`);
+
+    // Transform the backend data to match the frontend component's expected structure
+    return data.map((event: any) => {
+      // ✅ Ensure proper UTC to PH time conversion
+      const startTime = event.startTime ? new Date(event.startTime + 'Z') : new Date();
+      const endTime = event.endTime ? new Date(event.endTime + 'Z') : new Date();
+
+      const startLocal = startTime.toLocaleString('en-PH', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Manila'
+      });
+
+      const endLocal = endTime.toLocaleString('en-PH', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Manila'
+      });
+
+      if (event.type === 1) { // Drive
+        return {
+          id: event.id,
+          feId: event.fieldEngineerId,
+          type: 'drive',
+          distance: `${event.distanceKm?.toFixed(1) || 0} km`,
+          timeRange: `${startLocal} - ${endLocal}`,
+          duration: `${event.durationMinutes || 0} min`,
+          topSpeed: `${event.topSpeedKmh?.toFixed(0) || 0} km/h`,
+          riskyEvents: 0,
+          mapImage: image,
+          startLat: event.startLatitude,
+          startLng: event.startLongitude,
+          startAddress: event.startAddress || 'Unknown',
+          endLat: event.endLatitude,
+          endLng: event.endLongitude,
+          endAddress: event.endAddress || 'Unknown',
+          travelTimeCategory: event.travelTimeCategory,
+          calculatedFare: event.calculatedFare || 0,
+          routePathJson: event.routePathJson,
+        };
+      } else { // Stop
+        return {
+          id: event.id,
+          feId: event.fieldEngineerId,
+          type: 'stop',
+          locationName: event.locationName || 'Unknown',
+          address: event.address || 'Unknown location',
+          timeRange: `${startLocal} - ${endLocal}`,
+          duration: event.durationMinutes || 0,
+          mapImage: image,
+          lat: event.latitude || event.startLatitude,
+          lng: event.longitude || event.startLongitude,
+          startLat: event.startLatitude,
+          startLng: event.startLongitude,
+        };
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching activity history:', error);
+    throw error;
+  }
 };
+
+export type RawLocationPoint ={
+  fieldEngineerId: number;
+  latitude: number;
+  longitude: number;
+  speed?: number | null;
+  timestamp: string;
+
+}
+
+export async function fetchRawPoints(
+  feId: number,
+  startDate?: string,
+  endDate?: string
+): Promise<RawLocationPoint[]> {
+  const params = new URLSearchParams();
+  
+  // ✅ Add date range parameters
+  if (startDate) params.append("startDate", startDate);
+  if (endDate) params.append("endDate", endDate);
+  
+  const url = `${API_URL}/Location/${feId}${params.toString() ? '?' + params.toString() : ''}`;
+  
+  console.log('📍 Fetching raw points:', { feId, startDate, endDate, url });
+  
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to load raw points: ${res.status}`);
+  return res.json();
+}
+
+
+
+
+
+

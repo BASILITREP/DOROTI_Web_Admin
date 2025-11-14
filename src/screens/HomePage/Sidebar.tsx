@@ -1,34 +1,24 @@
 import { useEffect, useState, useRef } from "react";
-import type { Branch, ServiceRequest, OngoingRoute, FieldEngineer, ActivityHistory } from "../../types";
-import { fetchActivityHistory } from "../../services/api";
-import mapboxgl from "mapbox-gl";
+import type { OngoingRoute, FieldEngineer } from "../../types";
+
 
 // Interface for the component's props
 interface SidebarProps {
-  branches: Branch[];
-  serviceRequests: ServiceRequest[];
   ongoingRoutes: OngoingRoute[];
   fieldEngineers: FieldEngineer[];
   loading: boolean;
   error: string | null;
-  handleCreateServiceRequest: (branch: Branch) => void;
-  fetchBranchesData: () => void;
   onCollapseChange?: (collapsed: boolean) => void;
-  onFieldEngineerSelect?: (fe: FieldEngineer | null) => void; // Allow null
+  onFieldEngineerSelect?: (fe: FieldEngineer | null) => void;
   ActivityMapCard: React.ComponentType<{ lat: number; lng: number }>;
   ActivityDriveMapCard: React.ComponentType<{ startLat: number; startLng: number; endLat: number; endLng: number }>;
 }
 
-// The component now accepts props
 function Sidebar({
-  branches,
-  serviceRequests,
-  ongoingRoutes,
+
   fieldEngineers,
   loading,
   error,
-  handleCreateServiceRequest,
-  fetchBranchesData,
   onCollapseChange,
   onFieldEngineerSelect,
 }: SidebarProps) {
@@ -36,38 +26,77 @@ function Sidebar({
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedFE, setSelectedFE] = useState<FieldEngineer | null>(null);
   const [activeTab, setActiveTab] = useState<"branches" | "engineers">("engineers");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  
+  // Lazy loading states
+  const [displayedEngineers, setDisplayedEngineers] = useState<FieldEngineer[]>([]);
+  const [page, setPage] = useState(1);
+  const ITEMS_PER_PAGE = 20; // Load 20 items at a time
+  const observerTarget = useRef<HTMLDivElement>(null);
 
-  const handleToggle = () => {
-    const newState = !sidebarCollapsed;
-    setSidebarCollapsed(newState);
-    if (onCollapseChange) {
-      onCollapseChange(newState);
-    }
-  };
 
-  /*
-   * REMOVE THIS ENTIRE useEffect BLOCK.
-   * It is redundant and causes a race condition with the main data fetch in HomePage.
-   */
-  // useEffect(() => {
-  //   if (branches.length === 0) {
-  //     fetchBranchesData();
-  //   }
-  // }, [branches.length, fetchBranchesData]);
+  const handleToggle = async () => {
+  const newState = !sidebarCollapsed;
+  setSidebarCollapsed(newState);
+  if (onCollapseChange) {
+    onCollapseChange(newState);
+  }
 
-  const filteredBranches = branches.filter(
-    (branch) =>
-      searchQuery === "" ||
-      branch.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      branch.location.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
-  const filteredEngineers = fieldEngineers.filter(
-    (engineer) =>
+};
+
+
+  const filteredEngineers = fieldEngineers.filter((engineer) => {
+    const matchesSearch =
       searchQuery === "" ||
       engineer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      engineer.status.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+      engineer.status.toLowerCase().includes(searchQuery.toLowerCase());
+
+    const matchesStatus =
+      statusFilter === "all" || engineer.status === statusFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  // Reset displayed engineers when filters change
+  useEffect(() => {
+    setPage(1);
+    setDisplayedEngineers(filteredEngineers.slice(0, ITEMS_PER_PAGE));
+  }, [searchQuery, statusFilter, fieldEngineers.length]);
+
+  // Load more engineers when page changes
+  useEffect(() => {
+    const startIndex = 0;
+    const endIndex = page * ITEMS_PER_PAGE;
+    setDisplayedEngineers(filteredEngineers.slice(startIndex, endIndex));
+  }, [page]);
+
+  // Intersection Observer for infinite scroll
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loading) {
+          const hasMore = displayedEngineers.length < filteredEngineers.length;
+          if (hasMore) {
+            setPage((prev) => prev + 1);
+          }
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    const currentTarget = observerTarget.current;
+    if (currentTarget) {
+      observer.observe(currentTarget);
+    }
+
+    return () => {
+      if (currentTarget) {
+        observer.unobserve(currentTarget);
+      }
+    };
+  }, [displayedEngineers.length, filteredEngineers.length, loading]);
+
 
   const handleFEClick = (fe: FieldEngineer) => {
     setSelectedFE(fe);
@@ -76,38 +105,52 @@ function Sidebar({
     }
   };
 
-  const handleBackToList = () => {
-    setSelectedFE(null);
-    if (onFieldEngineerSelect) {
-      onFieldEngineerSelect(null); // Notify HomePage to close the panel
-    }
-  };
+  const handleBackToList = async () => {
+  setSelectedFE(null);
+  if (onFieldEngineerSelect) {
+    onFieldEngineerSelect(null);
+  }
+
+ 
+};
+
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Active":
-        return "bg-green-500";
-      case "On Assignment":
-        return "bg-orange-500";
-      case "Inactive":
-        return "bg-gray-500";
-      default:
-        return "bg-red-500";
-    }
-  };
+  switch (status) {
+    case "Active":
+      return "bg-green-500"; // 🟢
+    case "Location Off":
+      return "bg-yellow-500"; // 🟠
+    case "Logged In":
+      return "bg-blue-500"; // 🔵
+    case "Off-work":
+      return "bg-gray-400"; // ⚪
+    case "Inactive":
+      return "bg-red-400"; // 🔴
+    default:
+      return "bg-red-500"; // fallback
+  }
+};
+
+
 
   const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "Active":
-        return "✓";
-      case "On Assignment":
-        return "→";
-      case "Inactive":
-        return "●";
-      default:
-        return "?";
-    }
-  };
+  switch (status) {
+    case "Active":
+      return "✅";
+    case "Location Off":
+      return "⚠️";
+    case "Logged In":
+      return "🔵";
+    case "Off-work":
+      return "🕓";
+    case "Inactive":
+      return "🔴";
+    default:
+      return "❓";
+  }
+};
+
 
   return (
     <aside
@@ -182,36 +225,7 @@ function Sidebar({
             </span>
           </button>
 
-          <button
-            onClick={() => {
-              setActiveTab("branches");
-              handleBackToList(); // Use the new handler
-            }}
-            className={`flex-1 flex items-center justify-center gap-2 p-2 rounded-lg transition-colors ${
-              activeTab === "branches"
-                ? "bg-white/20 text-white"
-                : "bg-white/5 text-white/70 hover:bg-white/10"
-            }`}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={1.5}
-              stroke="currentColor"
-              className="w-4 h-4"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M3.75 21h16.5M4.5 3h15l-.75 18H5.25L4.5 3z"
-              />
-            </svg>
-            <span className="text-xs font-medium">Branches</span>
-            <span className="bg-white/20 text-white text-[10px] px-1.5 py-0.5 rounded-full">
-              {branches.length}
-            </span>
-          </button>
+          
         </div>
       </div>
 
@@ -274,89 +288,138 @@ function Sidebar({
               </button>
             )}
           </div>
+          {/* Search only field engineers */}
           {searchQuery && (
             <div className="mt-2 text-xs text-white/70">
               {activeTab === "engineers"
                 ? `Found ${filteredEngineers.length} of ${fieldEngineers.length} engineers`
-                : `Found ${filteredBranches.length} of ${branches.length} branches`}
+                : `Found ${filteredEngineers.length} of ${fieldEngineers.length} branches`}
             </div>
           )}
         </div>
 
-        {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-3">
-          {loading && (activeTab === "engineers" ? fieldEngineers.length === 0 : branches.length === 0) && (
-            <div className="flex justify-center py-8">
-              <span className="loading loading-spinner loading-md text-white"></span>
-            </div>
-          )}
-          {error && (activeTab === "engineers" ? fieldEngineers.length === 0 : branches.length === 0) && (
-            <div className="alert alert-error">
-              <span>{error}</span>
-            </div>
-          )}
 
-          {/* Field Engineers List */}
+        {/* ✅ Status Filter */}
+<div className="flex flex-wrap gap-3 mt-3 text-xs text-white">
+  {[
+    { label: "All", value: "all", color: "radio-success" },
+    { label: "Active", value: "Active", color: "radio-success" },
+    { label: "Location Off", value: "Location Off", color: "radio-warning" },
+    { label: "Logged In", value: "Logged In", color: "radio-info" },
+    { label: "Off-work", value: "Off-work", color: "radio-gray-400" },
+    { label: "Inactive", value: "Inactive", color: "radio-error" },
+  ].map(({ label, value, color }) => (
+    <label key={value} className="flex items-center gap-1 cursor-pointer">
+      <input
+        type="radio"
+        name="statusFilter"
+        className={`radio radio-sm ${color}`}
+        checked={statusFilter === value}
+        onChange={() => setStatusFilter(value)}
+      />
+      {label}
+    </label>
+  ))}
+</div>
+
+
+<aside
+  className={`fixed right-0 top-63 h-full max-h-screen bg-[#6b6f1d]/95 backdrop-blur transition-all duration-300 z-40 flex flex-col shadow-2xl ${
+    sidebarCollapsed ? "w-12" : "w-80"
+  }`}
+>
+        {/* Content Area NO BRANCHES */}
+        <div className="flex-1 overflow-y-scroll p-3 space-y-3">
+          {loading && activeTab === "engineers" && displayedEngineers.length === 0 && (
+  <div className="flex justify-center py-8">
+    <span className="loading loading-spinner loading-md text-white"></span>
+  </div>
+)}
+{error && activeTab === "engineers" && displayedEngineers.length === 0 && (
+  <div className="alert alert-error">
+    <span>{error}</span>
+  </div>
+)}
+
+          {/* Field Engineers List - Use displayedEngineers instead of filteredEngineers */}
           {activeTab === "engineers" && !selectedFE && (
             <>
-              {filteredEngineers.length === 0 && !loading ? (
+              {displayedEngineers.length === 0 && !loading ? (
                 <div className="text-center text-white/70 py-8">
                   No engineers found
                 </div>
               ) : (
-                filteredEngineers.map((engineer) => {
-                  const lastUpdated = new Date(engineer.lastUpdated);
-                  const timeString = lastUpdated.toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  });
+                <>
+                  {displayedEngineers.map((engineer) => {
 
-                  return (
-                    <div
-                      key={engineer.id}
-                      onClick={() => handleFEClick(engineer)}
-                      className="rounded-xl bg-white/10 hover:bg-white/20 p-3 shadow-lg backdrop-blur-sm cursor-pointer transition-all duration-200 border border-white/20"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-12 h-12 rounded-full ${getStatusColor(
-                            engineer.status
-                          )} flex items-center justify-center text-white font-bold text-lg relative`}
-                        >
-                          {engineer.name.charAt(0).toUpperCase()}
-                          <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-white rounded-full flex items-center justify-center text-xs">
-                            {getStatusIcon(engineer.status)}
+                    const addressString = engineer.currentAddress || "Unknown location";
+
+                    return (
+                      <div
+                        key={engineer.id}
+                        onClick={() => handleFEClick(engineer)}
+                        className="rounded-xl bg-white/10 hover:bg-white/20 p-3 shadow-lg backdrop-blur-sm cursor-pointer transition-all duration-200 border border-white/20"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-12 h-12 rounded-full ${getStatusColor(
+                              engineer.status
+                            )} flex items-center justify-center text-white font-bold text-lg relative`}
+                          >
+                            {engineer.name.charAt(0).toUpperCase()}
+                            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-white rounded-full flex items-center justify-center text-xs">
+                              {getStatusIcon(engineer.status)}
+                            </div>
                           </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-bold text-sm text-white truncate">
+                              {engineer.name}
+                            </h3>
+                            <p className="text-xs text-white/80 mt-0.5">
+                              {engineer.status}
+                            </p>
+                            <p className="text-[10px] text-white/60 mt-0.5">
+                              {engineer.status === "Active"
+                                ? `🕒 Updated: ${new Date(engineer.updatedAt).toLocaleString("en-PH", { hour: "2-digit", minute: "2-digit", hour12: true })}`
+                                : `Last seen: 📍${addressString}`}
+                            </p>
+                          </div>
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth={2}
+                            stroke="currentColor"
+                            className="w-4 h-4 text-white/60"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M8.25 4.5l7.5 7.5-7.5 7.5"
+                            />
+                          </svg>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-sm text-white truncate">
-                            {engineer.name}
-                          </h3>
-                          <p className="text-xs text-white/80 mt-0.5">
-                            {engineer.status}
-                          </p>
-                          <p className="text-[10px] text-white/60 mt-0.5">
-                            Updated: {timeString}
-                          </p>
-                        </div>
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          strokeWidth={2}
-                          stroke="currentColor"
-                          className="w-4 h-4 text-white/60"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M8.25 4.5l7.5 7.5-7.5 7.5"
-                          />
-                        </svg>
                       </div>
+                    );
+                  })}
+
+                  {/* Intersection Observer Target */}
+                  <div ref={observerTarget} className="h-4" />
+
+                  {/* Loading indicator for more items */}
+                  {displayedEngineers.length < filteredEngineers.length && (
+                    <div className="flex justify-center py-4">
+                      <span className="loading loading-spinner loading-sm text-white"></span>
                     </div>
-                  );
-                })
+                  )}
+
+                  {/* Count indicator */}
+                  {displayedEngineers.length > 0 && (
+                    <div className="text-center text-xs text-white/50 py-2">
+                      Showing {displayedEngineers.length} of {filteredEngineers.length}
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -437,9 +500,7 @@ function Sidebar({
                         Current Location
                       </p>
                       <p className="text-xs text-white/70">
-                        Lat: {selectedFE.lat.toFixed(6)}
-                        <br />
-                        Lng: {selectedFE.lng.toFixed(6)}
+                        {selectedFE.currentAddress || 'Unknown'}
                       </p>
                     </div>
                   </div>
@@ -460,10 +521,18 @@ function Sidebar({
                       />
                     </svg>
                     <div className="flex-1">
-                      <p className="text-xs font-medium mb-1">Last Updated</p>
+                      <p className="text-xs font-medium mb-1">Last Timed In:</p>
                       <p className="text-xs text-white/70">
-                        {new Date(selectedFE.lastUpdated).toLocaleString()}
-                      </p>
+  {selectedFE.timeIn
+    ? new Date(selectedFE.timeIn).toLocaleString("en-PH", {
+        timeZone: "Asia/Manila",
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "N/A"}
+</p>
+
+
                     </div>
                   </div>
 
@@ -473,44 +542,9 @@ function Sidebar({
             </div>
           )}
 
-          {/* Branches List */}
-          {activeTab === "branches" && (
-            <>
-              {filteredBranches.length === 0 && !loading ? (
-                <div className="text-center text-white/70 py-8">
-                  No branches found
-                </div>
-              ) : (
-                filteredBranches.map((branch) => (
-                  <div
-                    key={branch._id}
-                    className="rounded-xl bg-[#c8c87e] p-3 shadow-lg text-black hover:shadow-xl transition-shadow"
-                  >
-                    <div className="flex items-start gap-3">
-                      <img
-                        src={branch.image}
-                        alt={branch.name}
-                        className="w-16 h-16 rounded-lg object-cover"
-                      />
-                      <div className="flex-1">
-                        <h3 className="font-bold text-sm">{branch.name}</h3>
-                        <p className="text-xs text-gray-600 mt-1">
-                          {branch.location}
-                        </p>
-                        <button
-                          onClick={() => handleCreateServiceRequest(branch)}
-                          className="btn btn-xs btn-primary mt-2"
-                        >
-                          Request Service
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </>
-          )}
+    
         </div>
+        </aside>
       </div>
     </aside>
   );

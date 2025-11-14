@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+    <system.webServer>
+        <!-- Static file handling -->
+        <staticContent>
+            <!-- Add support for Vite-generated file types like .mjs and .ts -->
+            <mimeMap fileExtension=".mjs" mimeType="text/javascript" />
+            <!--<mimeMap fileExtension=".ts" mimeType="application/x-typescript" /> -->
+        </staticContent>
+
+        <!-- URL Rewrite rules to handle routing in Single Page Application (SPA) -->
+        <rewrite>
+            <rules>
+                <rule name="SPA Rewrite" stopProcessing="true">
+                    <!-- Match any URL except static assets -->
+                    <match url="^(?!.*\.(css|js|png|jpg|gif|svg|woff|woff2|ttf|eot|json)).*$" />
+                    <!-- Rewrite matched URLs to /index.html, respecting the /merchant-support-web-ei subpath -->
+                    <action type="Rewrite" url="/doroti-webadmin/index.html" />
+                </rule>
+            </rules>
+        </rewrite>
+
+        <!-- Enable directory browsing (optional) -->
+        <directoryBrowse enabled="true" />
+
+        <!-- Custom error page (optional) -->
+        <httpErrors errorMode="Detailed">
+            <remove statusCode="404" />
+            <!-- Serve index.html in the case of a 404 error -->
+            <error statusCode="404" path="/doroti-webadmin/index.html" responseMode="ExecuteURL" />
+        </httpErrors>
+    </system.webServer>
+</configuration>

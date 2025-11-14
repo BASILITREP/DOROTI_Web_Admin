@@ -1,11 +1,3 @@
-export interface Branch {
-  _id?: string;
-  name: string;
-  location: string;
-  image: string;
-  lat: number;
-  lng: number;
-}
 
 export interface FieldEngineer {
   id: number;
@@ -13,23 +5,16 @@ export interface FieldEngineer {
   lat: number;
   name: string;
   status: string;
-  lastUpdated: string;
+  updatedAt: string;
   fcmToken: string;
+  currentAddress?: string;
+  timeIn?: string;
+  phone?: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
 }
 
-export interface ServiceRequest {
-  id: string;
-  branchId: string;
-  branchName: string;
-  lat: number;
-  lng: number;
-  status: 'pending' | 'accepted' | 'cancelled' | 'expired';
-  createdAt: string;
-  acceptedAt?: string;
-  acceptedByFeId?: number;
-  acceptedByFeName?: string;
-  currentRadiusKm: number;
-}
 
 export interface RouteStep {
   maneuver: string;
@@ -53,7 +38,7 @@ export interface OngoingRoute {
 }
 
 export interface ActivityHistory {
-  id: number;
+  id: string;
   feId: number;
   type: 'drive' | 'stop';
   distance?: string;
@@ -63,7 +48,7 @@ export interface ActivityHistory {
   riskyEvents?: number;
   locationName?: string;
   address?: string;
-  mapImage: string;
+  //mapImage: string;
   lat?: number;
   lng?: number;
   startLat?: number;
@@ -76,4 +61,8 @@ export interface ActivityHistory {
   endTime: string;
   distanceKm?: number;
   topSpeedKmh?: number;
+  travelTimeCategory?: string;
+  calculatedFare?: number;
+  routePathJson?: string;
+  stayBeforeMinutes?: number;
 }
