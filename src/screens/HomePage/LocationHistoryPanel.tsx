@@ -827,10 +827,6 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
   }, [rawPoints, stayDurationFilter, shortStays, map]);
 
 
-
-
-
-
   return (
     <div
       className={`fixed bottom-0 transition-all duration-300 bg-[#6b6f1d]/95 backdrop-blur-md shadow-2xl rounded-t-2xl border-t-2 border-white/20 max-h-[240px] z-30`}

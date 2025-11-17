@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState,} from "react";
+import { useEffect, useRef, useState, } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import Header from "../header/Header";
@@ -33,23 +33,23 @@ function HomePage() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markers = useRef<{ [key: string | number]: mapboxgl.Marker }>({});
-  
+
   const [fieldEngineers, setFieldEngineers] = useState<FieldEngineer[]>([]);
 
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [showFieldEngineers] = useState<boolean>(true);
-  
+
   const [statusFilter] = useState<string | null>(null);
   const [ongoingRoutes] = useState<OngoingRoute[]>([]);
 
- 
+
   const [socketConnected, setSocketConnected] = useState<boolean>(false);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false); // Add sidebar state
 
   const [selectedFEForHistory, setSelectedFEForHistory] = useState<FieldEngineer | null>(null);
- 
+
   const routeLayerId = "active-route-layer";
 
 
@@ -88,7 +88,7 @@ function HomePage() {
 
     // Set the selected FE for history panel
     setSelectedFEForHistory(fe);
-    
+
   };
 
   // Fetch field engineers from API
@@ -310,7 +310,7 @@ function HomePage() {
 
         // DO NOT FETCH DATA HERE. This is causing a race condition.
         // The main useEffect at the bottom of the file handles all initial fetching.
-  
+
 
 
       });
@@ -328,13 +328,32 @@ function HomePage() {
     };
   }, []);
 
- 
-  
+  const statusStyles: Record<string, { color: string; pulse: string }> = {
+    Active: {
+      color: "#4CAF50",
+      pulse: "ping 1.2s ease-out infinite", // faster pulse
+    },
+    "Location Off": {
+      color: "#FFA500",
+      pulse: "ping 2s ease-out infinite", // slower
+    },
+    "Logged In": {
+      color: "#1E90FF",
+      pulse: "ping 1.5s ease-in-out infinite",
+    },
+    "Off-work": {
+      color: "#9E9E9E",
+      pulse: "none", // no pulse
+    },
+    Inactive: {
+      color: "#FF0000",
+      pulse: "ping 2.5s linear infinite", // very slow
+    },
+  };
 
 
 
 
-  // Update the field engineers useEffect
 
   // Update markers when field engineers data changes or filters change
   useEffect(() => {
@@ -378,6 +397,13 @@ function HomePage() {
         const markerElement = markers.current[engineer.id].getElement();
         markerElement.style.backgroundColor = color;
 
+        // Update ping color
+        const pingElement = markerElement.querySelector('div') as HTMLDivElement;
+        if (pingElement) {
+          pingElement.style.backgroundColor = `${color}80`;
+          pingElement.style.animation =
+            statusStyles[engineer.status]?.pulse || "ping 1.5s infinite";
+        }
 
 
         const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
@@ -386,8 +412,8 @@ function HomePage() {
           <span style="font-size: 12px;">Status: <b>${engineer.status}</b></span><br/>
           <span style="font-size: 12px;">📍 ${engineer.currentAddress || "Unknown"}</span><br/>
           <span style="font-size: 10px; color: #888;">Last updated: ${engineer.timeIn
-  ? new Date(engineer.timeIn).toLocaleString()
-  : "N/A"}
+            ? new Date(engineer.timeIn).toLocaleString()
+            : "N/A"}
 </span>
         </div>
       `);
@@ -412,7 +438,8 @@ function HomePage() {
         ping.style.height = "100%";
         ping.style.borderRadius = "50%";
         ping.style.backgroundColor = `${color}80`; // Add transparency
-        ping.style.animation = "ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite";
+        ping.style.animation = statusStyles[engineer.status]?.pulse || "ping 1.5s infinite";
+
         el.appendChild(ping);
 
         // Format the last updated time
@@ -607,7 +634,7 @@ function HomePage() {
     );
   };
 
- 
+
 
   //Main return
   return (
@@ -664,13 +691,13 @@ function HomePage() {
       {/* Floating Activity Log Panel - Bottom (only when FE is selected) */}
       {selectedFEForHistory && (
         <div
-  className="fixed bottom-0 transition-all duration-300 z-30"
-  style={{
-    width: "810px", // ✅ solid width, never changes
-    left: sidebarCollapsed ? "50%" : "calc(50% - 7rem)", // ✅ slide slightly left when sidebar expands
-    transform: "translateX(-50%)", // ✅ keep horizontally centered
-  }}
->
+          className="fixed bottom-0 transition-all duration-300 z-30"
+          style={{
+            width: "810px", // ✅ solid width, never changes
+            left: sidebarCollapsed ? "50%" : "calc(50% - 7rem)", // ✅ slide slightly left when sidebar expands
+            transform: "translateX(-50%)", // ✅ keep horizontally centered
+          }}
+        >
 
           <LocationHistoryPanel
             selectedEngineer={selectedFEForHistory}
@@ -678,7 +705,7 @@ function HomePage() {
               clearMapRoute(); // ✅ clear map when closing the panel
               setSelectedFEForHistory(null);
             }}
-            
+
             mapRef={map}
           />
         </div>
