@@ -6,6 +6,7 @@ import { fetchRawPoints } from "../../services/api";
 import type { RawLocationPoint } from "../../services/api";
 import type { FieldEngineer, ActivityHistory } from "../../types";
 import { reverseGeocode } from "../../utils/reverseGeocoding";
+import { useAppContext } from "../../context/StateContext";
 
 
 interface LocationHistoryPanelProps {
@@ -21,20 +22,28 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
   mapRef: map,
 
 }) => {
-  const [historyData, setHistoryData] = useState<ActivityHistory[]>([]);
+  //const [historyData, setHistoryData] = useState<ActivityHistory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [localCollapsed, setLocalCollapsed] = useState<boolean>(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [selectedActivityId, setSelectedActivityId] = useState<string | number | null>(null);
+  //const [selectedActivityId, setSelectedActivityId] = useState<string | number | null>(null);
 
   const [filter] = useState<"all" | "drive" | "stop">("all");
 
   const [sidebarCollapsed] = useState<boolean>(false); // Add sidebar state
-  const [stayDurationFilter, setStayDurationFilter] = useState<number | null>(null); // in minutes, null = no filter
+  //const [stayDurationFilter, setStayDurationFilter] = useState<number | null>(null); // in minutes, null = no filter
   const [rawPoints, setRawPoints] = useState<RawLocationPoint[]>([]);
 
   const [shortStays, setShortStays] = useState<{ lat: number; lng: number; duration: number }[]>([]);
   let activeFetchToken = useRef<symbol | null>(null);
+
+  const {
+  historyData, setHistoryData,
+  selectedActivityId, setSelectedActivityId,
+  stayDurationFilter, setStayDurationFilter,
+  dateRange, setDateRange
+} = useAppContext();
+
 
 
 
@@ -307,13 +316,13 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
 
   const mToDeg = (m: number) => m / 111_320;
 
-  const [dateRange, setDateRange] = useState<{
-    startDate: string;
-    endDate: string;
-  }>({
-    startDate: new Date().toISOString().split('T')[0], // Today
-    endDate: new Date().toISOString().split('T')[0],   // Today
-  });
+  // const [dateRange, setDateRange] = useState<{
+  //   startDate: string;
+  //   endDate: string;
+  // }>({
+  //   startDate: new Date().toISOString().split('T')[0], // Today
+  //   endDate: new Date().toISOString().split('T')[0],   // Today
+  // });
 
 
 
@@ -549,7 +558,6 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
       "Distance (km)": item.distance || "",
       "Time Range": item.timeRange || "",
       "Top Speed": item.topSpeed || "",
-      "Fare (₱)": item.calculatedFare?.toFixed(2) || "",
       "Stay Before (min)": (item as any).stayBeforeMinutes ?? "",
     }));
 
@@ -1090,7 +1098,7 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
                 if (stayDurationFilter === null) return true;
 
                 // ✅ Always include the very first drive (anchor 08:00)
-                if (index === 0 && item.type === "drive") return true;
+                //if (index === 0 && item.type === "drive") return true;
 
                 const stayBefore = (item as any).stayBeforeMinutes ?? 0;
                 // keep drive segments if stay before >= threshold OR it starts at anchor

@@ -4,6 +4,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import Header from "../header/Header";
 import Sidebar from "../screens/HomePage/Sidebar";
 import LocationHistoryPanel from "../screens/HomePage/LocationHistoryPanel";
+import { useAppContext } from "../context/StateContext";
 
 import type {
 
@@ -34,7 +35,7 @@ function HomePage() {
   const map = useRef<mapboxgl.Map | null>(null);
   const markers = useRef<{ [key: string | number]: mapboxgl.Marker }>({});
 
-  const [fieldEngineers, setFieldEngineers] = useState<FieldEngineer[]>([]);
+  //const [fieldEngineers, setFieldEngineers] = useState<FieldEngineer[]>([]);
 
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,11 +47,25 @@ function HomePage() {
 
   const [socketConnected, setSocketConnected] = useState<boolean>(false);
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false); // Add sidebar state
+  //const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false); // Add sidebar state
 
-  const [selectedFEForHistory, setSelectedFEForHistory] = useState<FieldEngineer | null>(null);
+  //const [selectedFEForHistory, setSelectedFEForHistory] = useState<FieldEngineer | null>(null);
 
   const routeLayerId = "active-route-layer";
+
+  const {
+    fieldEngineers,
+    setFieldEngineers,
+    sidebarCollapsed,
+    setSidebarCollapsed,
+    selectedFE,
+    setSelectedFE,
+  
+    setMapCenter,
+   
+    setMapZoom
+  } = useAppContext();
+
 
 
 
@@ -87,7 +102,7 @@ function HomePage() {
     }
 
     // Set the selected FE for history panel
-    setSelectedFEForHistory(fe);
+    setSelectedFE(fe);
 
   };
 
@@ -276,9 +291,6 @@ function HomePage() {
 
 
   useEffect(() => {
-    // REMOVE THE TOKEN ASSIGNMENT FROM HERE
-    // mapboxgl.accessToken =
-    //   "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNtZWFvNW43ZTA0ejQycHBtd3dkMHJ1bnkifQ.Y-IlM-vQAlaGr7pVQnug3Q";
 
     if (mapContainer.current && !map.current) {
       map.current = new mapboxgl.Map({
@@ -287,6 +299,12 @@ function HomePage() {
         center: [121.774017, 12.879721],
         zoom: 5.5,
       });
+      map.current.on("moveend", () => {
+        const c = map.current!.getCenter();
+        setMapCenter([c.lng, c.lat]);
+        setMapZoom(map.current!.getZoom());
+      });
+
 
       // Add navigation controls (optional)
       map.current.addControl(new mapboxgl.NavigationControl(), "top-right");
@@ -689,7 +707,7 @@ function HomePage() {
 
 
       {/* Floating Activity Log Panel - Bottom (only when FE is selected) */}
-      {selectedFEForHistory && (
+      {selectedFE && (
         <div
           className="fixed bottom-0 transition-all duration-300 z-30"
           style={{
@@ -700,10 +718,10 @@ function HomePage() {
         >
 
           <LocationHistoryPanel
-            selectedEngineer={selectedFEForHistory}
+            selectedEngineer={selectedFE}
             onClose={() => {
               clearMapRoute(); // ✅ clear map when closing the panel
-              setSelectedFEForHistory(null);
+              setSelectedFE(null);
             }}
 
             mapRef={map}
