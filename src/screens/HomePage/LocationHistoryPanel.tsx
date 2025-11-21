@@ -44,6 +44,8 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
   dateRange, setDateRange
 } = useAppContext();
 
+// earliestCardId is computed dynamically in the render logic below
+
 
 
 
@@ -137,109 +139,77 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
     return fare;
   }
 
-  function groupIntoDriveSegments(points: RawLocationPoint[], stayThresholdMin: number) {
-    const mergeStops: RawLocationPoint[] = [];
+ function groupIntoDriveSegments(points: RawLocationPoint[], stayThresholdMin: number) {
+  if (!points || points.length < 2) return [];
 
-    if (!points || points.length < 2) return [];
+  const sorted = [...points].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
 
-    const sorted = [...points].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
+  let segments: { points: RawLocationPoint[]; stayBeforeMinutes: number }[] = [];
 
-    const segments: { points: RawLocationPoint[]; stayBeforeMinutes: number }[] = [];
+  let current: RawLocationPoint[] = [sorted[0]];
+  let stopStart: number | null = null;
+  let accumulatedStay = 0;
 
-    let current: RawLocationPoint[] = [sorted[0]];
-    let stopStart: number | null = null;
-    let accumulatedStay = 0;
+  const isStoppedSpeed = (speed: number | null | undefined) =>
+    (speed ?? 0) < 0.5; // <1.8 km/h stationary
 
-    for (let i = 1; i < sorted.length; i++) {
-   
-      const curr = sorted[i];
+  for (let i = 1; i < sorted.length; i++) {
+    const curr = sorted[i];
 
-      const currTime = new Date(curr.timestamp).getTime();
-      const isStopped = (curr.speed ?? 0) === 0;
+    const t = new Date(curr.timestamp).getTime();
 
-      if (isStopped) {
-        // Start timing stop
-        if (stopStart === null) stopStart = currTime;
-      } else {
-        // End of stop → compute duration
-        if (stopStart !== null) {
-          const stopDuration = (currTime - stopStart) / 60000;
-          accumulatedStay += stopDuration;
-          stopStart = null;
-        }
-      }
-
-      // 🔥 TRIGGER SPLIT ONLY WHEN STOP DURATION EXCEEDS THRESHOLD
-      if (accumulatedStay >= stayThresholdMin) {
-        const lastStopPoint = sorted[i - 1];
-        mergeStops.push(lastStopPoint); // record where the merge happened
-        segments.push({
-          points: [...current],
-          stayBeforeMinutes: Math.floor(accumulatedStay),
-        });
-        current = [current[current.length - 1], curr];
-        accumulatedStay = 0;
-      } else {
-        current.push(curr);
+    // --- STOP DETECTION (noise-resistant) ---
+    if (isStoppedSpeed(curr.speed)) {
+      if (stopStart === null) stopStart = t;
+    } else {
+      if (stopStart !== null) {
+        accumulatedStay += (t - stopStart) / 60000;
+        stopStart = null;
       }
     }
 
-    // ✅ handle unfinished stop at end (still within last segment)
-    if (stopStart !== null) {
-      const lastTime = new Date(sorted[sorted.length - 1].timestamp).getTime();
-      const finalStopDuration = (lastTime - stopStart) / 60000;
-
-      if (finalStopDuration >= stayThresholdMin && current.length > 1) {
-        segments.push({
-          points: [...current],
-          stayBeforeMinutes: Math.floor(finalStopDuration),
-        });
-        current = [current[current.length - 1]]; // reset anchor
-      } else {
-        accumulatedStay += finalStopDuration;
-      }
-    }
-
-
-    // ✅ Always push the last segment if it has movement
-    // ✅ Push last segment only if it did NOT already end with a qualified stay
-    if (current.length > 1 && accumulatedStay < stayThresholdMin) {
+    // --- QUALIFIED STAY FOUND ---
+    if (accumulatedStay >= stayThresholdMin) {
       segments.push({
         points: [...current],
         stayBeforeMinutes: Math.floor(accumulatedStay),
       });
+
+      // reset everything clean
+      current = [curr];
+      accumulatedStay = 0;
+      stopStart = null;
+      continue;
     }
 
-
-    // ✅ 🟢 ALWAYS INCLUDE CLOCK-IN DRIVE (ANCHOR)
-    // ✅ Include initial drive only if no segment starts at first timestamp
-    if (
-      segments.length === 0 ||
-      (segments[0].points.length > 0 &&
-        segments[0].points[0].timestamp !== sorted[0].timestamp)
-    ) {
-      segments.unshift({
-        points: sorted.slice(0, 2),
-        stayBeforeMinutes: 0,
-      });
-    }
-
-
-    console.log("✅ FINAL SEGMENTS (clean):");
-    console.table(
-      segments.map((s, i) => ({
-        seg: i + 1,
-        start: s.points[0].timestamp,
-        end: s.points[s.points.length - 1].timestamp,
-        stayBefore: s.stayBeforeMinutes,
-        pts: s.points.length,
-      }))
-    );
-
-    return segments;
+    current.push(curr);
   }
+
+  // --- HANDLE FINAL STOP IF STILL ONGOING ---
+  if (stopStart !== null) {
+    const lastT = new Date(sorted[sorted.length - 1].timestamp).getTime();
+    const finalStop = (lastT - stopStart) / 60000;
+    accumulatedStay += finalStop;
+  }
+
+  // --- PUSH FINAL SEGMENT ---
+  segments.push({
+    points: current,
+    stayBeforeMinutes: Math.floor(accumulatedStay),
+  });
+
+  // --- ALWAYS force the first "drive" to exist for CLOCK-IN ---
+  if (segments.length === 0) {
+    segments.push({
+      points: sorted.slice(0, 2),
+      stayBeforeMinutes: 0,
+    });
+  }
+
+  return segments;
+}
 
 
 
@@ -247,71 +217,87 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
 
 
   // Convert a segment → ActivityHistory (progressive rendering enabled)
-  async function segmentToActivity(
-    seg: { points: RawLocationPoint[]; stayBeforeMinutes: number },
-    idx: number,
-    onUpdate: (updated: ActivityHistory) => void
-  ): Promise<ActivityHistory> {
+async function segmentToActivity(
+  seg: { points: RawLocationPoint[]; stayBeforeMinutes: number },
+  idx: number,
+  onUpdate: (updated: ActivityHistory) => void
+): Promise<ActivityHistory> {
 
-    const pts = seg.points;
-    const start = pts[0];
-    const end = pts[pts.length - 1];
+  const pts = seg.points;
+  const start = pts[0];
+  const end = pts[pts.length - 1];
 
-    const { distanceKm, durationMinutes, topSpeedKmh } = computeSegmentMetrics(pts);
+  // Compute metrics normally (seg.points)
+  const { distanceKm, durationMinutes, topSpeedKmh } = computeSegmentMetrics(pts);
 
-    const routePairs = pts.map(p => [p.longitude, p.latitude]);
-    const routePathJson = JSON.stringify(routePairs);
+  // ---------------------------------------------------------
+  // ⭐ REAL FIX: Use FULL RAW POINTS between start → end
+  // ---------------------------------------------------------
+  const fullPoints = rawPoints.filter(p =>
+    new Date(p.timestamp).getTime() >= new Date(start.timestamp).getTime() &&
+    new Date(p.timestamp).getTime() <= new Date(end.timestamp).getTime()
+  );
 
-    let startTime = toDate(start.timestamp);
-    const endTime = toDate(end.timestamp);
+  // If somehow empty (should never happen), fallback to segment points
+  const routePairs = (fullPoints.length > 0 ? fullPoints : pts)
+    .map(p => [p.longitude, p.latitude]);
 
-    // 1️⃣ INITIAL CARD (INSTANT RENDER)
-    const partial: ActivityHistory = {
-      id: `${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 9)}`,
-      feId: start.fieldEngineerId,
-      type: "drive",
-      startAddress: "Loading address…",
-      endAddress: "Loading address…",
-      distance: `${distanceKm.toFixed(2)} km`,
-      timeRange: `${formatTime12(startTime)} - ${formatTime12(endTime)}`,
-      duration: `${durationMinutes} min`,
-      topSpeed: `${topSpeedKmh} km/h`,
-      calculatedFare: computeFare(distanceKm),
-      startLat: start.latitude,
-      startLng: start.longitude,
-      endLat: end.latitude,
-      endLng: end.longitude,
-      routePathJson,
-      startTime: start.timestamp,
-      endTime: end.timestamp,
-      stayBeforeMinutes: seg.stayBeforeMinutes,
+  const routePathJson = JSON.stringify(routePairs);
+  // ---------------------------------------------------------
+
+  let startTime = toDate(start.timestamp);
+  const endTime = toDate(end.timestamp);
+
+  // 1️⃣ INITIAL CARD (INSTANT RENDER)
+  const partial: ActivityHistory = {
+    id: `${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 9)}`,
+    feId: start.fieldEngineerId,
+    type: "drive",
+    startAddress: "Loading address…",
+    endAddress: "Loading address…",
+    distance: `${distanceKm.toFixed(2)} km`,
+    timeRange: `${formatTime12(startTime)} - ${formatTime12(endTime)}`,
+    duration: `${durationMinutes} min`,
+    topSpeed: `${topSpeedKmh} km/h`,
+    calculatedFare: computeFare(distanceKm),
+    startLat: start.latitude,
+    startLng: start.longitude,
+    endLat: end.latitude,
+    endLng: end.longitude,
+    routePathJson,
+    startTime: start.timestamp,
+    endTime: end.timestamp,
+    stayBeforeMinutes: seg.stayBeforeMinutes,
+    
+  };
+
+  // Return immediately → UI renders this instantly
+  setTimeout(() => onUpdate(partial), 0);
+
+  // 2️⃣ BACKGROUND ADDRESS FETCH (non-blocking)
+  try {
+    const { start: startGeo, end: endGeo } = await loadDriveAddresses(
+      start.latitude,
+      start.longitude,
+      end.latitude,
+      end.longitude
+    );
+
+    // 3️⃣ UPDATE CARD AFTER GEOCODE FINISHES
+    const updated = {
+      ...partial,
+      startAddress: startGeo.address,
+      endAddress: endGeo.address,
     };
 
-    // Return immediately → UI renders this instantly
-    setTimeout(() => onUpdate(partial), 0);
-
-    // 2️⃣ BACKGROUND ADDRESS FETCH (non-blocking)
-    try {
-      const { start: startGeo, end: endGeo } = await loadDriveAddresses(
-        start.latitude,
-        start.longitude,
-        end.latitude,
-        end.longitude
-      );
-
-      // 3️⃣ UPDATE CARD AFTER GEOCODE FINISHES
-      const updated = {
-        ...partial,
-        startAddress: startGeo.address,
-        endAddress: endGeo.address,
-      };
-
-      onUpdate(updated);
-    } catch (e) {
-      console.error("Reverse geocoding failed:", e);
-    }
-    return partial;
+    onUpdate(updated);
+  } catch (e) {
+    console.error("Reverse geocoding failed:", e);
   }
+
+  return partial;
+}
+
 
 
   const mToDeg = (m: number) => m / 111_320;
@@ -424,7 +410,15 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
           const start = pts[0];
           const end = pts[pts.length - 1];
           const { distanceKm, durationMinutes, topSpeedKmh } = computeSegmentMetrics(pts);
-          const routePairs = pts.map(p => [p.longitude, p.latitude]);
+          // Use FULL RAW POINTS between start → end timestamps
+const fullPoints = rawPoints.filter(p =>
+  new Date(p.timestamp).getTime() >= new Date(start.timestamp).getTime() &&
+  new Date(p.timestamp).getTime() <= new Date(end.timestamp).getTime()
+);
+
+const routePairs = (fullPoints.length ? fullPoints : pts)
+  .map(p => [p.longitude, p.latitude]);
+
           const routePathJson = JSON.stringify(routePairs);
           const startTime = toDate(start.timestamp);
           const endTime = toDate(end.timestamp);
@@ -1068,46 +1062,51 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
               </div>
             </div>
           ) : (
-            historyData
-              .slice()              // clone array to avoid mutating
-              .reverse()
-              .filter((item) => {
-                if (filter === "all") return true;
-                if (filter === "drive") return item.type === "drive";
-                if (filter === "stop") return item.type === "stop";
-                return true;
-              })
-              // ✅ APPLY DATE RANGE FILTER FIRST
-              .filter((item) => {
-                // ✅ SAFEST: Use regex to extract YYYY-MM-DD from any format
-                const dateMatch = item.startTime.match(/(\d{4}-\d{2}-\d{2})/);
-                if (!dateMatch) {
-                  console.warn("⚠️ Invalid timestamp format:", item.startTime);
-                  return false;
-                }
+            (() => {
+              // ✅ Step 1: Apply all filters FIRST
+              const filtered = historyData
+                .slice()
+                .filter((item) => {
+                  if (filter === "all") return true;
+                  if (filter === "drive") return item.type === "drive";
+                  if (filter === "stop") return item.type === "stop";
+                  return true;
+                })
+                // ✅ APPLY DATE RANGE FILTER
+                .filter((item) => {
+                  const dateMatch = item.startTime.match(/(\d{4}-\d{2}-\d{2})/);
+                  if (!dateMatch) {
+                    console.warn("⚠️ Invalid timestamp format:", item.startTime);
+                    return false;
+                  }
 
-                const itemDate = dateMatch[1]; // "2025-11-13"
-                const matches = itemDate >= dateRange.startDate && itemDate <= dateRange.endDate;
+                  const itemDate = dateMatch[1];
+                  const matches = itemDate >= dateRange.startDate && itemDate <= dateRange.endDate;
 
-                console.log(`📅 Card: ${itemDate}, Filter: ${dateRange.startDate} to ${dateRange.endDate}, Match: ${matches}`);
+                  console.log(`📅 Card: ${itemDate}, Filter: ${dateRange.startDate} to ${dateRange.endDate}, Match: ${matches}`);
 
-                return matches;
-              })
-              // ✅ THEN APPLY STAY DURATION FILTER (first item in date range is always included)
-              .filter((item, index) => {
-                if (stayDurationFilter === null) return true;
+                  return matches;
+                });
 
-                // ✅ Always include the very first drive (anchor 08:00)
-                //if (index === 0 && item.type === "drive") return true;
+              // ✅ Step 2: Find the earliest card BEFORE reversing
+              const earliest = filtered[0]; // First item chronologically
+              const earliestCardId = earliest?.id;
 
-                const stayBefore = (item as any).stayBeforeMinutes ?? 0;
-                // keep drive segments if stay before >= threshold OR it starts at anchor
-                return stayBefore >= stayDurationFilter || item.startTime.includes("08:00");
-              })
+              // ✅ Step 3: Apply stay duration filter (always allow earliest)
+              const finalFiltered = filtered
+                .filter((item) => {
+                  if (stayDurationFilter === null) return true;
 
+                  // ✅ Always allow the earliest drive of the day
+                  if (item.id === earliestCardId) return true;
 
+                  const stayBefore = (item as any).stayBeforeMinutes ?? 0;
+                  return stayBefore >= stayDurationFilter;
+                })
+                .reverse();
 
-              .map((item) => (
+              return finalFiltered
+                .map((item) => (
                 <div
                   key={item.id}
                   onMouseEnter={(e) => {
@@ -1327,6 +1326,12 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
                   {/* Header */}
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-2">
+                      {item.id === earliestCardId && (
+  <div className="  bg-green-600 text-white text-[8px] rounded-md mb-1 shadow">
+    CLOCK-IN
+  </div>
+)}
+
                       <div
                         className={`w-7 h-7 rounded-md flex items-center justify-center ${item.type === "drive" ? "bg-blue-500/80" : "bg-yellow-500/80"
                           }`}
@@ -1381,7 +1386,7 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
                       <div className="truncate">
                         <span className="text-red-400">B:</span> {item.endAddress}
                       </div>
-                      <div className="grid grid-cols-2 text-[10px] text-white/80 pt-1 text-[10px] space-y-0.5 text-white/80">
+                      <div className="grid grid-cols-2 text-[10px] text-white/80 pt-1 space-y-0.5">
                         <div className="flex justify-between">
 
                           <span>⏱ Duration: {
@@ -1417,10 +1422,6 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
                             Stayed {item.stayBeforeMinutes} min{item.stayBeforeMinutes > 1 ? "s" : ""} before this drive
                           </div>
                         )}
-
-
-
-
                     </div>
                   ) : (
                     <div className="text-[11px] text-white/70 space-y-1">
@@ -1438,10 +1439,11 @@ const LocationHistoryPanel: React.FC<LocationHistoryPanelProps> = ({
                 </div>
 
               ))
+            })()
           )}
         </div>
       </div>
     </div>
   );
 };
-export default LocationHistoryPanel;
+export default LocationHistoryPanel; 

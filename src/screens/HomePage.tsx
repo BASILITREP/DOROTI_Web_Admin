@@ -426,13 +426,9 @@ function HomePage() {
 
         const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
         <div style="padding: 8px;">
-          <strong>${engineer.name}</strong><br/>
+         <span style="font-weight: bold; font-size: 14px;">${engineer.name}</span><br/>
           <span style="font-size: 12px;">Status: <b>${engineer.status}</b></span><br/>
-          <span style="font-size: 12px;">📍 ${engineer.currentAddress || "Unknown"}</span><br/>
-          <span style="font-size: 10px; color: #888;">Last updated: ${engineer.timeIn
-            ? new Date(engineer.timeIn).toLocaleString()
-            : "N/A"}
-</span>
+          <span style="font-size: 12px;">Last Seen: <b>${engineer.currentAddress || "Unknown"}</b></span><br/>
         </div>
       `);
 
